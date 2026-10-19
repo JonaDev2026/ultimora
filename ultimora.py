@@ -10,7 +10,7 @@ import json
 import subprocess
 import feedparser
 import webbrowser
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap, QImage
@@ -260,7 +260,7 @@ def create_card_image(title, pub_time, source_name, img_url, is_dark):
                     f.write(resp.read())
             
             im = Image.open(tmp_img).convert("RGB")
-            im = im.resize((img_w, img_h), Image.Resampling.LANCZOS)
+            im = ImageOps.fit(im, (img_w, img_h), Image.Resampling.LANCZOS, centering=(0.5, 0.3))
             
             mask = Image.new("L", (img_w, img_h), 0)
             mask_draw = ImageDraw.Draw(mask)
