@@ -309,7 +309,6 @@ class FeedWorker(QThread):
         for feed in RSS_FEEDS:
             try:
                 parsed = feedparser.parse(feed["url"])
-                # Limitiamo a 3 notizie per feed per arrivare a un totale di 6 card
                 for entry in parsed.entries[:3]:
                     title = clean_text(entry.get("title", ""))
                     link = entry.get("link", "")
@@ -357,8 +356,8 @@ class NewsWidget(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setStyleSheet("background: transparent;")
         
-        # Altezza ridotta per ospitare esattamente meteo + 6 card + footer comandi
-        self.setFixedSize(480, 830)
+        # Altezza portata a 880 per garantire ampio spazio senza alcuno sforzo o scroll
+        self.setFixedSize(480, 880)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(10, 10, 10, 10)
