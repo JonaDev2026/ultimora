@@ -1,22 +1,32 @@
-# Ultimora - PyQt6 Desktop News & Weather Widget
+# Ultimora
 
-**Ultimora** is a modern, lightweight desktop widget written entirely in Python using PyQt6.
+**Ultimora** is a modern, lightweight desktop widget written in Python using PyQt6.
 
-## System Requirements
-- GNOME / Cinnamon / XFCE (for gsettings localization and dark/light mode sync).
+## Requirements
+- Python 3.8+
+- Linux (GNOME/Mint/XFCE)
 
-## Python Dependencies
-- PyQt6
-- feedparser
-- Pillow (PIL)
-
-### Installation (Debian, Ubuntu, Linux Mint)
+## Dependencies
 ```bash
 sudo apt update
 sudo apt install python3-pyqt6 python3-feedparser python3-pil
 ```
 
-## Usage
-```bash
-python3 ~/scripts/ultimora/ultimora.py &
+## Autostart (Systemd)
+1. mkdir -p ~/.config/systemd/user
+2. nano ~/.config/systemd/user/ultimora.service
+
+```ini
+[Unit]
+Description=Ultimora Widget
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/jonathan/scripts/ultimora/ultimora.py
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target
 ```
+
+3. systemctl --user daemon-reload && systemctl --user enable --now ultimora.service
