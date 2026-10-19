@@ -1,0 +1,15 @@
+{
+  "feeds": [
+    {
+      "name": "Tgcom24",
+      "url": "https://www.tgcom24.mediaset.it/rss/homepage.xml"
+    },
+    {
+      "name": "BBC News",
+      "url": "https://feeds.bbci.co.uk/news/uk/rss.xml"
+    }
+  ],
+  "mixed": true,
+  "collapsed": false,
+  "refresh_minutes": 15
+}
