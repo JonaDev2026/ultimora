@@ -400,24 +400,62 @@ class NewsWidget(QWidget):
         self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.close_btn.mousePressEvent = lambda e: self.close()
 
+        self.hide_btn = QLabel("⬇ Nascondi")
+        self.hide_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.hide_btn.mousePressEvent = lambda e: self.collapse_widget()
+
+        self.icon_lbl = QLabel("📰")
+        self.icon_lbl.setFixedSize(56, 56)
+        self.icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.icon_lbl.mousePressEvent = lambda e: self.expand_widget()
+        self.icon_lbl.hide()
+
         self.update_footer_style()
 
         self.footer_layout.addWidget(self.reload_btn)
         self.footer_layout.addStretch()
+        self.footer_layout.addWidget(self.hide_btn)
+        self.footer_layout.addStretch()
         self.footer_layout.addWidget(self.close_btn)
         
         main_layout.addLayout(self.footer_layout)
+        main_layout.addWidget(self.icon_lbl)
 
         screen = QApplication.primaryScreen().geometry()
         self.move(screen.width() - 500, 20)
         
         self.weather_lbl.setPixmap(create_weather_image(WEATHER_CITY, self.current_is_dark))
 
+    def collapse_widget(self):
+        self._exp_pos = self.pos()
+        for w in (self.weather_lbl, self.scroll_area, self.reload_btn, self.hide_btn, self.close_btn):
+            w.hide()
+        self.layout().setContentsMargins(0, 0, 0, 0)
+        self.layout().setSpacing(0)
+        self.footer_layout.setContentsMargins(0, 0, 0, 0)
+        self.icon_lbl.show()
+        self.setFixedSize(56, 56)
+        self.move(self._exp_pos.x() + 480 - 56, self._exp_pos.y())
+
+    def expand_widget(self):
+        self.icon_lbl.hide()
+        self.layout().setContentsMargins(10, 10, 10, 10)
+        self.layout().setSpacing(8)
+        self.footer_layout.setContentsMargins(10, 2, 10, 2)
+        for w in (self.weather_lbl, self.scroll_area, self.reload_btn, self.hide_btn, self.close_btn):
+            w.show()
+        self.setFixedSize(480, 880)
+        self.move(self._exp_pos)
+
     def update_footer_style(self):
         colors = get_theme_colors(self.current_is_dark)
         style = f"color: rgb({colors['SUBTEXT_COLOR'][0]}, {colors['SUBTEXT_COLOR'][1]}, {colors['SUBTEXT_COLOR'][2]}); font-size: 11px; font-weight: bold;"
         self.reload_btn.setStyleSheet(style)
         self.close_btn.setStyleSheet(style)
+        self.hide_btn.setStyleSheet(style)
+        bg = colors['CARD_BG']
+        self.icon_lbl.setStyleSheet("background: transparent; font-size: 26px;")
 
     def check_theme_change(self):
         new_is_dark = is_gnome_dark_mode()
