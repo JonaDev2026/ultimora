@@ -4,6 +4,7 @@ import os
 import re
 import html
 import time
+import calendar
 from datetime import datetime, timedelta
 import urllib.request
 import json
@@ -315,10 +316,13 @@ class FeedWorker(QThread):
                     link = entry.get("link", "")
                     
                     pub_time = "12:00"
+                    ts = 0
                     if hasattr(entry, "published_parsed") and entry.published_parsed:
                         pub_time = time.strftime("%H:%M", entry.published_parsed)
+                        ts = calendar.timegm(entry.published_parsed)
                     elif hasattr(entry, "updated_parsed") and entry.updated_parsed:
                         pub_time = time.strftime("%H:%M", entry.updated_parsed)
+                        ts = calendar.timegm(entry.updated_parsed)
 
                     img_url = ""
                     if "enclosures" in entry and entry.enclosures:
@@ -332,6 +336,7 @@ class FeedWorker(QThread):
                         "title": title,
                         "link": link,
                         "time": pub_time,
+                        "ts": ts,
                         "source": feed["name"],
                         "img_url": img_url
                     })
@@ -345,6 +350,7 @@ class NewsWidget(QWidget):
         super().__init__()
         self.current_is_dark = is_gnome_dark_mode()
         self.cached_items = []
+        self.mixed = True
         self.initUI()
         self.load_feeds()
 
@@ -400,6 +406,10 @@ class NewsWidget(QWidget):
         self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.close_btn.mousePressEvent = lambda e: self.close()
 
+        self.shuffle_btn = QLabel("🔀 Per fonte")
+        self.shuffle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.shuffle_btn.mousePressEvent = lambda e: self.toggle_mix()
+
         self.hide_btn = QLabel("⬇ Nascondi")
         self.hide_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.hide_btn.mousePressEvent = lambda e: self.collapse_widget()
@@ -414,6 +424,8 @@ class NewsWidget(QWidget):
         self.update_footer_style()
 
         self.footer_layout.addWidget(self.reload_btn)
+        self.footer_layout.addSpacing(14)
+        self.footer_layout.addWidget(self.shuffle_btn)
         self.footer_layout.addStretch()
         self.footer_layout.addWidget(self.hide_btn)
         self.footer_layout.addStretch()
@@ -429,7 +441,7 @@ class NewsWidget(QWidget):
 
     def collapse_widget(self):
         self._exp_pos = self.pos()
-        for w in (self.weather_lbl, self.scroll_area, self.reload_btn, self.hide_btn, self.close_btn):
+        for w in (self.weather_lbl, self.scroll_area, self.reload_btn, self.shuffle_btn, self.hide_btn, self.close_btn):
             w.hide()
         self.layout().setContentsMargins(0, 0, 0, 0)
         self.layout().setSpacing(0)
@@ -443,16 +455,23 @@ class NewsWidget(QWidget):
         self.layout().setContentsMargins(10, 10, 10, 10)
         self.layout().setSpacing(8)
         self.footer_layout.setContentsMargins(10, 2, 10, 2)
-        for w in (self.weather_lbl, self.scroll_area, self.reload_btn, self.hide_btn, self.close_btn):
+        for w in (self.weather_lbl, self.scroll_area, self.reload_btn, self.shuffle_btn, self.hide_btn, self.close_btn):
             w.show()
         self.setFixedSize(480, 880)
         self.move(self._exp_pos)
+
+    def toggle_mix(self):
+        self.mixed = not self.mixed
+        self.shuffle_btn.setText("🔀 Per fonte" if self.mixed else "🔀 Mescola")
+        if self.cached_items:
+            self.display_cards(self.cached_items)
 
     def update_footer_style(self):
         colors = get_theme_colors(self.current_is_dark)
         style = f"color: rgb({colors['SUBTEXT_COLOR'][0]}, {colors['SUBTEXT_COLOR'][1]}, {colors['SUBTEXT_COLOR'][2]}); font-size: 11px; font-weight: bold;"
         self.reload_btn.setStyleSheet(style)
         self.close_btn.setStyleSheet(style)
+        self.shuffle_btn.setStyleSheet(style)
         self.hide_btn.setStyleSheet(style)
         bg = colors['CARD_BG']
         self.icon_lbl.setStyleSheet("background: transparent; font-size: 26px;")
@@ -476,6 +495,8 @@ class NewsWidget(QWidget):
         self.display_cards(items)
 
     def display_cards(self, items):
+        if self.mixed:
+            items = sorted(items, key=lambda x: x.get("ts", 0), reverse=True)
         for i in reversed(range(self.grid_layout.count())): 
             widget = self.grid_layout.itemAt(i).widget()
             if widget:
