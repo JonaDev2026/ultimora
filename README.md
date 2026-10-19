@@ -1,5 +1,7 @@
 # Ultimora
 
+![Ultimora Preview](preview.png)
+
 **Ultimora** is a modern, lightweight desktop widget written in Python using PyQt6.
 
 ## Requirements
