@@ -352,6 +352,10 @@ class NewsWidget(QWidget):
         self.theme_timer.timeout.connect(self.check_theme_change)
         self.theme_timer.start(3000)
 
+        self.refresh_timer = QTimer(self)
+        self.refresh_timer.timeout.connect(self.load_feeds)
+        self.refresh_timer.start(15 * 60 * 1000)
+
     def initUI(self):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
