@@ -17,7 +17,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
-    QScrollArea, QLabel
+    QScrollArea, QLabel, QLineEdit, QPushButton, QFrame
 )
 
 # ==============================================================================
@@ -194,7 +194,7 @@ def create_weather_image(city, is_dark):
     if current_icon_url:
         big_size = 42 * SCALE
         try:
-            tmp_big = f"/tmp/owm_big_{hash(current_icon_url)}.png"
+            tmp_big = cache_path("owm_big", current_icon_url, "png")
             if not os.path.exists(tmp_big):
                 req_big = urllib.request.Request(current_icon_url, headers={'User-Agent': 'Mozilla/5.0'})
                 with urllib.request.urlopen(req_big, timeout=2) as resp_big, open(tmp_big, 'wb') as f_big:
@@ -220,7 +220,7 @@ def create_weather_image(city, is_dark):
             
             icon_size = 30 * SCALE
             try:
-                tmp_icon = f"/tmp/owm_ico_{hash(slot['icon_url'])}.png"
+                tmp_icon = cache_path("owm_ico", slot['icon_url'], "png")
                 if not os.path.exists(tmp_icon):
                     req_ico = urllib.request.Request(slot["icon_url"], headers={'User-Agent': 'Mozilla/5.0'})
                     with urllib.request.urlopen(req_ico, timeout=2) as resp_ico, open(tmp_icon, 'wb') as f_ico:
@@ -253,12 +253,8 @@ def create_card_image(title, pub_time, source_name, img_url, is_dark):
 
     img_w, img_h = (220 - 16) * SCALE, 115 * SCALE
     if img_url:
-        tmp_img = f"/tmp/thumb_{hash(img_url)}.jpg"
+        tmp_img = cache_path("thumb", img_url, "jpg")
         try:
-            if not os.path.exists(tmp_img):
-                req = urllib.request.Request(img_url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=3) as resp, open(tmp_img, 'wb') as f:
-                    f.write(resp.read())
             
             im = Image.open(tmp_img).convert("RGB")
             im = ImageOps.fit(im, (img_w, img_h), Image.Resampling.LANCZOS, centering=(0.5, 0.3))
@@ -302,56 +298,175 @@ class ClickableLabel(QLabel):
         if event.button() == Qt.MouseButton.LeftButton and self.link_url:
             webbrowser.open(self.link_url)
 
+import hashlib
+
+CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "ultimora")
+
+def cache_path(prefix, url, ext):
+    return os.path.join(CACHE_DIR, f"{prefix}_{hashlib.md5(url.encode('utf-8')).hexdigest()}.{ext}")
+
+def init_cache():
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        limit = time.time() - 7 * 24 * 3600
+        for name in os.listdir(CACHE_DIR):
+            fp = os.path.join(CACHE_DIR, name)
+            try:
+                if os.path.isfile(fp) and os.path.getmtime(fp) < limit:
+                    os.remove(fp)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+init_cache()
+
+from concurrent.futures import ThreadPoolExecutor
+
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+def save_config(cfg):
+    try:
+        tmp = CONFIG_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, CONFIG_PATH)
+    except Exception:
+        pass
+
+def load_config():
+    cfg = {
+        "feeds": [{"name": f["name"], "url": f["url"]} for f in RSS_FEEDS],
+        "mixed": True,
+        "collapsed": False,
+        "refresh_minutes": 15,
+    }
+    if not os.path.exists(CONFIG_PATH):
+        save_config(cfg)
+        return cfg
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data.get("feeds"), list):
+            cfg["feeds"] = [
+                {"name": str(x.get("name") or x["url"])[:40], "url": x["url"]}
+                for x in data["feeds"] if isinstance(x, dict) and x.get("url")
+            ]
+        for k in ("mixed", "collapsed"):
+            if isinstance(data.get(k), bool):
+                cfg[k] = data[k]
+        rm = data.get("refresh_minutes")
+        if isinstance(rm, (int, float)) and not isinstance(rm, bool) and rm >= 1:
+            cfg["refresh_minutes"] = rm
+    except Exception:
+        pass
+    return cfg
+
+def prefetch_image(img_url):
+    tmp_img = cache_path("thumb", img_url, "jpg")
+    if os.path.exists(tmp_img):
+        return
+    try:
+        req = urllib.request.Request(img_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            data = resp.read()
+        with open(tmp_img, 'wb') as f:
+            f.write(data)
+    except Exception:
+        pass
+
 class FeedWorker(QThread):
     cards_ready = pyqtSignal(list)
 
+    def __init__(self, feeds):
+        super().__init__()
+        self.feeds = feeds
+
+    def fetch_feed(self, feed):
+        items = []
+        try:
+            parsed = feedparser.parse(feed["url"])
+            for entry in parsed.entries:
+                title = clean_text(entry.get("title", ""))
+                link = entry.get("link", "")
+
+                pub_time = "12:00"
+                ts = 0
+                if hasattr(entry, "published_parsed") and entry.published_parsed:
+                    pub_time = time.strftime("%H:%M", entry.published_parsed)
+                    ts = calendar.timegm(entry.published_parsed)
+                elif hasattr(entry, "updated_parsed") and entry.updated_parsed:
+                    pub_time = time.strftime("%H:%M", entry.updated_parsed)
+                    ts = calendar.timegm(entry.updated_parsed)
+
+                img_url = ""
+                if "enclosures" in entry and entry.enclosures:
+                    img_url = entry.enclosures[0].get("href", "")
+                if not img_url and "media_content" in entry:
+                    img_url = entry.media_content[0].get("url", "")
+                if not img_url and "media_thumbnail" in entry:
+                    img_url = entry.media_thumbnail[0].get("url", "")
+
+                items.append({
+                    "title": title,
+                    "link": link,
+                    "time": pub_time,
+                    "ts": ts,
+                    "source": feed["name"],
+                    "img_url": img_url
+                })
+        except Exception:
+            pass
+        return items
+
     def run(self):
         items_data = []
-        for feed in RSS_FEEDS:
-            try:
-                parsed = feedparser.parse(feed["url"])
-                # Prende le prime 3 notizie da TGCOM24 e le prime 3 da BBC UK
-                for entry in parsed.entries:
-                    title = clean_text(entry.get("title", ""))
-                    link = entry.get("link", "")
-                    
-                    pub_time = "12:00"
-                    ts = 0
-                    if hasattr(entry, "published_parsed") and entry.published_parsed:
-                        pub_time = time.strftime("%H:%M", entry.published_parsed)
-                        ts = calendar.timegm(entry.published_parsed)
-                    elif hasattr(entry, "updated_parsed") and entry.updated_parsed:
-                        pub_time = time.strftime("%H:%M", entry.updated_parsed)
-                        ts = calendar.timegm(entry.updated_parsed)
+        if self.feeds:
+            with ThreadPoolExecutor(max_workers=min(8, len(self.feeds))) as ex:
+                for res in ex.map(self.fetch_feed, self.feeds):
+                    items_data.extend(res)
+            urls = list({i["img_url"] for i in items_data if i["img_url"]})
+            if urls:
+                with ThreadPoolExecutor(max_workers=8) as ex:
+                    list(ex.map(prefetch_image, urls))
+        self.cards_ready.emit(items_data)
 
-                    img_url = ""
-                    if "enclosures" in entry and entry.enclosures:
-                        img_url = entry.enclosures[0].get("href", "")
-                    if not img_url and "media_content" in entry:
-                        img_url = entry.media_content[0].get("url", "")
-                    if not img_url and "media_thumbnail" in entry:
-                        img_url = entry.media_thumbnail[0].get("url", "")
-                    
-                    items_data.append({
-                        "title": title,
-                        "link": link,
-                        "time": pub_time,
-                        "ts": ts,
-                        "source": feed["name"],
-                        "img_url": img_url
-                    })
+class AddFeedWorker(QThread):
+    result = pyqtSignal(bool, str, str, str)
+
+    def __init__(self, url):
+        super().__init__()
+        self.url = url
+
+    def run(self):
+        try:
+            parsed = feedparser.parse(self.url)
+            if not parsed.entries:
+                self.result.emit(False, "", self.url, "Feed non valido o non raggiungibile")
+                return
+            name = ""
+            try:
+                name = clean_text(parsed.feed.get("title", ""))
             except Exception:
                 pass
-
-        self.cards_ready.emit(items_data)
+            if not name:
+                name = urllib.parse.urlparse(self.url).netloc
+            self.result.emit(True, name[:40], self.url, "")
+        except Exception:
+            self.result.emit(False, "", self.url, "Errore di connessione")
 
 class NewsWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.current_is_dark = is_gnome_dark_mode()
         self.cached_items = []
-        self.mixed = True
+        self.cfg = load_config()
+        self.mixed = self.cfg["mixed"]
+        self.collapsed = False
+        self.settings_open = False
         self.initUI()
+        if self.cfg["collapsed"]:
+            self.collapse_widget()
         self.load_feeds()
 
         self.theme_timer = QTimer(self)
@@ -360,7 +475,7 @@ class NewsWidget(QWidget):
 
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self.load_feeds)
-        self.refresh_timer.start(15 * 60 * 1000)
+        self.refresh_timer.start(int(self.cfg["refresh_minutes"] * 60 * 1000))
 
     def initUI(self):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
@@ -393,6 +508,8 @@ class NewsWidget(QWidget):
 
         self.scroll_area.setWidget(self.container)
         main_layout.addWidget(self.scroll_area)
+        self.build_settings_panel()
+        main_layout.addWidget(self.settings_panel, 1)
 
         # 3. FOOTER FISSO IN BASSO (CHIUDI / RICARICA)
         self.footer_layout = QHBoxLayout()
@@ -406,9 +523,13 @@ class NewsWidget(QWidget):
         self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.close_btn.mousePressEvent = lambda e: self.close()
 
-        self.shuffle_btn = QLabel("🔀 Per fonte")
+        self.shuffle_btn = QLabel("🔀 Per fonte" if self.mixed else "🔀 Mescola")
         self.shuffle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.shuffle_btn.mousePressEvent = lambda e: self.toggle_mix()
+
+        self.settings_btn = QLabel("⚙ Impostazioni")
+        self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.settings_btn.mousePressEvent = lambda e: self.toggle_settings()
 
         self.hide_btn = QLabel("⬇ Nascondi")
         self.hide_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -426,6 +547,8 @@ class NewsWidget(QWidget):
         self.footer_layout.addWidget(self.reload_btn)
         self.footer_layout.addSpacing(14)
         self.footer_layout.addWidget(self.shuffle_btn)
+        self.footer_layout.addSpacing(12)
+        self.footer_layout.addWidget(self.settings_btn)
         self.footer_layout.addStretch()
         self.footer_layout.addWidget(self.hide_btn)
         self.footer_layout.addStretch()
@@ -440,8 +563,12 @@ class NewsWidget(QWidget):
         self.weather_lbl.setPixmap(create_weather_image(WEATHER_CITY, self.current_is_dark))
 
     def collapse_widget(self):
+        if self.collapsed:
+            return
+        self.collapsed = True
         self._exp_pos = self.pos()
-        for w in (self.weather_lbl, self.scroll_area, self.reload_btn, self.shuffle_btn, self.hide_btn, self.close_btn):
+        for w in (self.weather_lbl, self.scroll_area, self.settings_panel, self.reload_btn,
+                  self.shuffle_btn, self.settings_btn, self.hide_btn, self.close_btn):
             w.hide()
         self.layout().setContentsMargins(0, 0, 0, 0)
         self.layout().setSpacing(0)
@@ -449,19 +576,158 @@ class NewsWidget(QWidget):
         self.icon_lbl.show()
         self.setFixedSize(56, 56)
         self.move(self._exp_pos.x() + 480 - 56, self._exp_pos.y())
+        self.cfg["collapsed"] = True
+        save_config(self.cfg)
 
     def expand_widget(self):
+        if not self.collapsed:
+            return
+        self.collapsed = False
         self.icon_lbl.hide()
         self.layout().setContentsMargins(10, 10, 10, 10)
         self.layout().setSpacing(8)
         self.footer_layout.setContentsMargins(10, 2, 10, 2)
-        for w in (self.weather_lbl, self.scroll_area, self.reload_btn, self.shuffle_btn, self.hide_btn, self.close_btn):
+        for w in (self.weather_lbl, self.reload_btn, self.shuffle_btn,
+                  self.settings_btn, self.hide_btn, self.close_btn):
             w.show()
+        self.scroll_area.setVisible(not self.settings_open)
+        self.settings_panel.setVisible(self.settings_open)
         self.setFixedSize(480, 880)
         self.move(self._exp_pos)
+        self.cfg["collapsed"] = False
+        save_config(self.cfg)
+
+    def build_settings_panel(self):
+        self.settings_panel = QWidget()
+        lay = QVBoxLayout(self.settings_panel)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+
+        self.set_title = QLabel("Feed RSS / XML")
+        lay.addWidget(self.set_title)
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self.url_input = QLineEdit()
+        self.url_input.setPlaceholderText("Incolla qui l'URL del feed (https://...)")
+        self.url_input.returnPressed.connect(self.add_feed)
+        self.add_btn = QPushButton("Aggiungi")
+        self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.add_btn.clicked.connect(self.add_feed)
+        row.addWidget(self.url_input)
+        row.addWidget(self.add_btn)
+        lay.addLayout(row)
+
+        self.set_status = QLabel("")
+        lay.addWidget(self.set_status)
+
+        self.feeds_scroll = QScrollArea()
+        self.feeds_scroll.setWidgetResizable(True)
+        self.feeds_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.feeds_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.feeds_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        feeds_box = QWidget()
+        feeds_box.setStyleSheet("background: transparent;")
+        self.feeds_list_layout = QVBoxLayout(feeds_box)
+        self.feeds_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.feeds_list_layout.setSpacing(6)
+        self.feeds_scroll.setWidget(feeds_box)
+        lay.addWidget(self.feeds_scroll, 1)
+
+        self.settings_panel.hide()
+
+    def style_settings(self):
+        c = get_theme_colors(self.current_is_dark)
+        def rgb(k):
+            t = c[k]
+            return f"rgb({t[0]}, {t[1]}, {t[2]})"
+        self.set_title.setStyleSheet(f"color: {rgb('TEXT_COLOR')}; font-size: 13px; font-weight: bold; background: transparent;")
+        self.set_status.setStyleSheet(f"color: {rgb('SUBTEXT_COLOR')}; font-size: 11px; background: transparent;")
+        self.url_input.setStyleSheet(f"QLineEdit {{ background: {rgb('CARD_BG')}; color: {rgb('TEXT_COLOR')}; border: 1px solid {rgb('LINE_COLOR')}; border-radius: 8px; padding: 6px 8px; font-size: 12px; }}")
+        self.add_btn.setStyleSheet(f"QPushButton {{ background: {rgb('CARD_BG')}; color: {rgb('TEXT_COLOR')}; border: 1px solid {rgb('LINE_COLOR')}; border-radius: 8px; padding: 6px 12px; font-size: 12px; font-weight: bold; }}")
+        self.refresh_feed_list()
+
+    def refresh_feed_list(self):
+        c = get_theme_colors(self.current_is_dark)
+        def rgb(k):
+            t = c[k]
+            return f"rgb({t[0]}, {t[1]}, {t[2]})"
+        while self.feeds_list_layout.count():
+            it = self.feeds_list_layout.takeAt(0)
+            w = it.widget()
+            if w:
+                w.setParent(None)
+                w.deleteLater()
+        for f in self.cfg["feeds"]:
+            fr = QFrame()
+            fr.setObjectName("feedrow")
+            fr.setStyleSheet(f"QFrame#feedrow {{ background: {rgb('CARD_BG')}; border-radius: 10px; }}")
+            h = QHBoxLayout(fr)
+            h.setContentsMargins(12, 8, 12, 8)
+            nm = QLabel(f["name"])
+            nm.setToolTip(f["url"])
+            nm.setStyleSheet(f"color: {rgb('TEXT_COLOR')}; font-size: 12px; background: transparent;")
+            x = QLabel("✖")
+            x.setCursor(Qt.CursorShape.PointingHandCursor)
+            x.setStyleSheet(f"color: {rgb('SUBTEXT_COLOR')}; font-size: 12px; font-weight: bold; background: transparent;")
+            x.mousePressEvent = lambda e, u=f["url"]: self.remove_feed(u)
+            h.addWidget(nm)
+            h.addStretch()
+            h.addWidget(x)
+            self.feeds_list_layout.addWidget(fr)
+        self.feeds_list_layout.addStretch()
+
+    def toggle_settings(self):
+        self.settings_open = not self.settings_open
+        self.scroll_area.setVisible(not self.settings_open)
+        self.settings_panel.setVisible(self.settings_open)
+        self.settings_btn.setText("↩ Indietro" if self.settings_open else "⚙ Impostazioni")
+        if self.settings_open:
+            self.set_status.setText("")
+            self.refresh_feed_list()
+
+    def add_feed(self):
+        url = self.url_input.text().strip()
+        if not url:
+            return
+        if not url.lower().startswith(("http://", "https://")):
+            self.set_status.setText("L'URL deve iniziare con http:// o https://")
+            return
+        if any(f["url"] == url for f in self.cfg["feeds"]):
+            self.set_status.setText("Feed gia' presente")
+            return
+        w = getattr(self, "add_worker", None)
+        if w is not None and w.isRunning():
+            return
+        self.add_btn.setEnabled(False)
+        self.set_status.setText("Verifica in corso...")
+        self.add_worker = AddFeedWorker(url)
+        self.add_worker.result.connect(self.on_feed_checked)
+        self.add_worker.start()
+
+    def on_feed_checked(self, ok, name, url, msg):
+        self.add_btn.setEnabled(True)
+        if not ok:
+            self.set_status.setText(msg)
+            return
+        self.cfg["feeds"].append({"name": name, "url": url})
+        save_config(self.cfg)
+        self.url_input.clear()
+        self.set_status.setText("Aggiunto: " + name)
+        self.refresh_feed_list()
+        self.load_feeds()
+
+    def remove_feed(self, url):
+        self.cfg["feeds"] = [f for f in self.cfg["feeds"] if f["url"] != url]
+        save_config(self.cfg)
+        self.set_status.setText("Feed rimosso")
+        self.refresh_feed_list()
+        self.load_feeds()
 
     def toggle_mix(self):
         self.mixed = not self.mixed
+        self.cfg["mixed"] = self.mixed
+        save_config(self.cfg)
         self.shuffle_btn.setText("🔀 Per fonte" if self.mixed else "🔀 Mescola")
         if self.cached_items:
             self.display_cards(self.cached_items)
@@ -472,6 +738,8 @@ class NewsWidget(QWidget):
         self.reload_btn.setStyleSheet(style)
         self.close_btn.setStyleSheet(style)
         self.shuffle_btn.setStyleSheet(style)
+        self.settings_btn.setStyleSheet(style)
+        self.style_settings()
         self.hide_btn.setStyleSheet(style)
         bg = colors['CARD_BG']
         self.icon_lbl.setStyleSheet("background: transparent; font-size: 26px;")
@@ -486,9 +754,20 @@ class NewsWidget(QWidget):
                 self.display_cards(self.cached_items)
 
     def load_feeds(self):
-        self.worker = FeedWorker()
+        w = getattr(self, "worker", None)
+        if w is not None and w.isRunning():
+            self._reload_again = True
+            return
+        self._reload_again = False
+        self.worker = FeedWorker(list(self.cfg["feeds"]))
         self.worker.cards_ready.connect(self.on_feeds_loaded)
+        self.worker.finished.connect(self.on_worker_finished)
         self.worker.start()
+
+    def on_worker_finished(self):
+        self.worker.wait()
+        if getattr(self, "_reload_again", False):
+            self.load_feeds()
 
     def on_feeds_loaded(self, items):
         self.cached_items = items
@@ -497,12 +776,20 @@ class NewsWidget(QWidget):
     def display_cards(self, items):
         if self.mixed:
             items = sorted(items, key=lambda x: x.get("ts", 0), reverse=True)
-        for i in reversed(range(self.grid_layout.count())): 
+        self._render_gen = getattr(self, "_render_gen", 0) + 1
+        for i in reversed(range(self.grid_layout.count())):
             widget = self.grid_layout.itemAt(i).widget()
             if widget:
+                widget.setParent(None)
                 widget.deleteLater()
+        self.render_rows(self._render_gen, items, 0)
 
-        for i in range(0, len(items), 2):
+    def render_rows(self, gen, items, i):
+        if gen != self._render_gen:
+            return
+        for _ in range(2):
+            if i >= len(items):
+                return
             row_widget = QWidget()
             row_widget.setStyleSheet("background: transparent;")
             row_layout = QHBoxLayout(row_widget)
@@ -521,6 +808,8 @@ class NewsWidget(QWidget):
                 row_layout.addWidget(lbl2)
 
             self.grid_layout.addWidget(row_widget)
+            i += 2
+        QTimer.singleShot(0, lambda: self.render_rows(gen, items, i))
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
