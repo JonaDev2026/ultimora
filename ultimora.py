@@ -309,7 +309,8 @@ class FeedWorker(QThread):
         for feed in RSS_FEEDS:
             try:
                 parsed = feedparser.parse(feed["url"])
-                for entry in parsed.entries[:3]:
+                # Prende le prime 3 notizie da TGCOM24 e le prime 3 da BBC UK
+                for entry in parsed.entries:
                     title = clean_text(entry.get("title", ""))
                     link = entry.get("link", "")
                     
@@ -356,7 +357,7 @@ class NewsWidget(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setStyleSheet("background: transparent;")
         
-        # Altezza portata a 880 per garantire ampio spazio senza alcuno sforzo o scroll
+        # Altezza fissa impostata a 880
         self.setFixedSize(480, 880)
 
         main_layout = QVBoxLayout(self)
@@ -367,7 +368,7 @@ class NewsWidget(QWidget):
         self.weather_lbl = QLabel()
         main_layout.addWidget(self.weather_lbl)
 
-        # 2. AREA SCROLLABILE NOTIZIE (6 card max)
+        # 2. AREA SCROLLABILE CON SCROLLBAR ATTIVA AL BISOGNO
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -438,7 +439,7 @@ class NewsWidget(QWidget):
             if widget:
                 widget.deleteLater()
 
-        for i in range(0, min(len(items), 6), 2):
+        for i in range(0, len(items), 2):
             row_widget = QWidget()
             row_widget.setStyleSheet("background: transparent;")
             row_layout = QHBoxLayout(row_widget)
