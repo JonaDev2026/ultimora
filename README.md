@@ -6,6 +6,10 @@
 
 ![Preview](preview.png)
 
+https://github.com/user-attachments/assets/a176b590-960d-4478-868c-571e036402e7
+
+
+
 ## Requirements
 - Linux (GNOME/Mint/XFCE)
 - Python 3.8+
