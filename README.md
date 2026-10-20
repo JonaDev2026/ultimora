@@ -4,7 +4,6 @@
 
 **Ultimora** is a modern, lightweight desktop widget written in Python using PyQt6. It shows the latest news from your favourite RSS feeds next to a weather card.
 
-![Preview](preview.png)
 
 https://github.com/user-attachments/assets/a176b590-960d-4478-868c-571e036402e7
 
