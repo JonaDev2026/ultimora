@@ -43,17 +43,6 @@ ultimora
 sudo apt remove ultimora
 ```
 
-### Switching from the manual version
-If you already run the Python version as a systemd service, remove the service first, otherwise two copies of the widget will start:
-
-```bash
-systemctl --user disable --now ultimora.service
-rm ~/.config/systemd/user/ultimora.service
-systemctl --user daemon-reload
-```
-
-Then install the `.deb` as shown above. You can delete the old script folder afterwards.
-
 ---
 
 ## 2. Manual installation (Python version)
@@ -91,3 +80,14 @@ WantedBy=graphical-session.target
 3. systemctl --user daemon-reload && systemctl --user enable --now ultimora.service
 
 Adjust the path in `ExecStart` if the script is not in `~/scripts/ultimora/`.
+
+### Switch to the .deb version
+If you run the manual version as a systemd service, remove the service first, otherwise two copies of the widget will start:
+
+```bash
+systemctl --user disable --now ultimora.service
+rm ~/.config/systemd/user/ultimora.service
+systemctl --user daemon-reload
+```
+
+Then install the `.deb` as described in section 1. You can delete the old script folder afterwards.
