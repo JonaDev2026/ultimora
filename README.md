@@ -1,6 +1,6 @@
-**🇮🇹 [Leggi in italiano](README.it.md)**
+**🇮🇹 [Leggi in italiano? clicca qui](README.it.md)**
 
-# Ultimora
+# <img src="icon.png" width="40" height="40" align="absmiddle"> Ultimora
 
 **Ultimora** is a modern, lightweight desktop widget written in Python using PyQt6. It shows the latest news from your favourite RSS feeds next to a weather card.
 
