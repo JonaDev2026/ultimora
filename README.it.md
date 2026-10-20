@@ -1,4 +1,4 @@
-# Ultimora
+# <img src="icon.png" width="40" height="40" align="absmiddle"> Ultimora
 
 **Ultimora** è un widget desktop moderno e leggero scritto in Python con PyQt6. Mostra le ultime notizie dei tuoi feed RSS preferiti accanto a una card meteo.
 
